@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>R&D Works - Next Gen Management</title>
+    
+    <!-- 1. 스타일 및 폰트 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- 2. React 및 Babel 로드 -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 3. Firebase SDK (Compat Version for CDN usage) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-analytics-compat.js"></script>
+
+    <style>
+        body { 
+            font-family: 'Pretendard', sans-serif; 
+            background-color: #f0f4f8;
+            color: #1e293b;
+        }
+        
+        /* Glassmorphism Utilities */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
+        }
+        
+        .glass-sidebar {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        /* Ambient Background Animation */
+        .ambient-bg {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: -1;
+            background: radial-gradient(circle at 0% 0%, #e0f2fe 0%, transparent 50%), 
+                        radial-gradient(circle at 100% 100%, #f0fdf4 0%, transparent 50%),
+                        radial-gradient(circle at 100% 0%, #fef2f2 0%, transparent 50%);
+            opacity: 0.8;
+        }
+
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .chart-bar { transition: height 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Connectivity Pulse */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.33); }
+            80%, 100% { opacity: 0; }
+        }
+        .connection-dot {
+            position: relative;
+        }
+        .connection-dot::before {
+            content: '';
+            position: absolute;
+            width: 100%; height: 100%;
+            background-color: inherit;
+            border-radius: 50%;
+            z-index: -1;
+            opacity: 0.7;
+            animation: pulse-ring 1.25s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        
+        /* Select Dropdown Custom Style */
+        select {
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 0.5rem center;
+            background-repeat: no-repeat;
+            background-size: 1.5em 1.5em;
+            padding-right: 2.5rem;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-bg"></div>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        /**
+         * ------------------------------------------------------------------
+         * [Configuration] Firebase 설정 (Dynamic Environment Support)
+         * ------------------------------------------------------------------
+         */
+        // Use environment configuration to match the custom token audience
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "AIzaSyAI-hUY_kIyyqgUzBBf4E16LZfuGqf94bI",
+            authDomain: "rnd-works.firebaseapp.com",
+            projectId: "rnd-works",
+            storageBucket: "rnd-works.firebasestorage.app",
+            messagingSenderId: "233545804888",
+            appId: "1:233545804888:web:38cfe6ed77d75eba636e2d",
+            measurementId: "G-28JR1H8JX6"
+        };
+
+        // Initialize Firebase
+        let db, storage, auth, analytics;
+        
+        // System Environment Variables
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        try {
+            if (!firebase.apps.length) {
+                const app = firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                storage = firebase.storage();
+                auth = firebase.auth();
+                analytics = firebase.analytics();
+                console.log("Firebase initialized successfully");
+            }
+        } catch (e) {
+            console.error("Firebase Init Error:", e);
+        }
+
+        // [FIX] Collection Helper: Updated to PUBLIC Shared Path
+        // Path: artifacts/{appId}/public/data/{collectionName}
+        // This ensures ALL users see the SAME data (Shared Repository)
+        const getCollection = (collectionName) => {
+            if (!db) return null;
+            // Auth check is still required for security rules, even for public data
+            const user = auth.currentUser;
+            if (!user) return null;
+            
+            // Changed from 'users/{uid}' to 'public/data' for shared access
+            return db.collection('artifacts').doc(appId).collection('public').doc('data').collection(collectionName);
+        };
+
+        // [FIX] Storage Path Helper: Nested under public path
+        const getStoragePath = (filename) => {
+            return `artifacts/${appId}/public/data/uploads/${Date.now()}_${filename}`;
+        };
+
+        /**
+         * ------------------------------------------------------------------
+         * [Mock Data] Fallback for Offline/Demo Mode
+         * ------------------------------------------------------------------
+         */
+        const MOCK_DATA = {
+            personnel: [
+                { id: 'm1', name: '김연구', position: '수석연구원', degree: '박사', major: '컴퓨터공학', status: '재직' },
+                { id: 'm2', name: '이개발', position: '선임연구원', degree: '석사', major: '전자공학', status: '재직' },
+                { id: 'm3', name: '박기획', position: '주임연구원', degree: '학사', major: '경영학', status: '휴직' },
+            ],
+            projects: [
+                { id: 'p1', title: '차세대 AI 기반 최적화 알고리즘 개발', agency: '중소벤처기업부', budget: 150000000, startDate: '2025-01-01', deadline: '2025-12-31', status: '선정' },
+                { id: 'p2', title: '친환경 스마트 팩토리 구축 사업', agency: '산업통상자원부', budget: 300000000, startDate: '2024-06-01', deadline: '2026-05-31', status: '작성중' },
+                { id: 'p3', title: '블록체인 기반 데이터 보안 솔루션', agency: '과학기술정보통신부', budget: 120000000, startDate: '2025-03-01', deadline: '2025-11-30', status: '마감임박' },
+            ],
+            expenses: [
+                { id: 'e1', projectId: 'p1', projectTitle: '차세대 AI 기반 최적화 알고리즘 개발', date: '2025-01-15', item: 'GPU 서버 대여료', amount: 550000, status: '승인' },
+                { id: 'e2', projectId: 'p1', projectTitle: '차세대 AI 기반 최적화 알고리즘 개발', date: '2025-02-10', item: '연구개발 소프트웨어 구독', amount: 220000, status: '승인' },
+                { id: 'e3', projectId: 'p2', projectTitle: '친환경 스마트 팩토리 구축 사업', date: '2025-01-20', item: '센서 모듈 구입', amount: 1500000, status: '승인' },
+            ]
+        };
+
+        /**
+         * ------------------------------------------------------------------
+         * [Icons] SVG Icons
+         * ------------------------------------------------------------------
+         */
+        const Icons = {
+            Home: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+            Building: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M8 10h.01"/><path d="M16 10h.01"/><path d="M8 14h.01"/><path d="M16 14h.01"/></svg>,
+            Users: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+            FileText: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>,
+            Briefcase: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>,
+            Calendar: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>,
+            CreditCard: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect width="22" height="14" x="1" y="8" rx="2" ry="2"/><line x1="1" x2="23" y1="14" y2="14"/><path d="M1 12h22"/><path d="M1 8h22"/></svg>,
+            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+            Trash: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+            Upload: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>,
+            Cloud: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19c0-1.7-1.3-3-3-3h-11a4 4 0 0 1-3.5-6 4 4 0 0 1 7-2.6 7 7 0 0 1 13.5 3.5c0 2.1-1.6 3.9-3.7 4"/></svg>,
+            Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+            Bell: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
+            AlertTriangle: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+            X: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+            Clip: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13.293 3.293 7.05 9.536a3.536 3.536 0 0 0 5 5l1.585-1.586"/><path d="m16.879 13.12 1.585-1.585a6 6 0 1 0-8.486-8.486L2.929 10.1a6 6 0 1 0 8.485 8.486l6.516-6.516"/></svg>,
+            Filter: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        };
+
+        /**
+         * ------------------------------------------------------------------
+         * [Components] UI Components
+         * ------------------------------------------------------------------
+         */
+        const Card = ({ children, title, className = "", action }) => (
+            <div className={`glass-panel rounded-2xl p-6 hover:shadow-lg transition-all duration-300 ${className}`}>
+                <div className="flex justify-between items-center mb-5">
+                    {title && <h3 className="text-lg font-bold text-slate-800 tracking-tight">{title}</h3>}
+                    {action}
+                </div>
+                {children}
+            </div>
+        );
+
+        const Button = ({ children, onClick, variant = "primary", className = "", disabled=false }) => {
+            const baseStyle = "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 flex items-center gap-2 justify-center shadow-sm active:scale-95";
+            const variants = {
+                primary: "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-blue-500/30 hover:shadow-md disabled:opacity-50",
+                secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:bg-slate-50",
+                danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 disabled:bg-slate-50",
+            };
+            return (
+                <button className={`${baseStyle} ${variants[variant]} ${className}`} onClick={onClick} disabled={disabled}>
+                    {children}
+                </button>
+            );
+        };
+
+        const StatusBadge = ({ status }) => {
+            let style = "bg-slate-100 text-slate-600 border-slate-200";
+            if (['접수완료', '선정', '재직', '승인'].includes(status)) style = "bg-emerald-50 text-emerald-700 border-emerald-100";
+            if (['작성중', 'R&D', '대기'].includes(status)) style = "bg-blue-50 text-blue-700 border-blue-100";
+            if (['마감임박', '휴직', '반려'].includes(status)) style = "bg-rose-50 text-rose-700 border-rose-100";
+            return (
+                <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${style}`}>
+                    {status}
+                </span>
+            );
+        };
+
+        const Modal = ({ isOpen, onClose, title, children }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-300">
+                    <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in border border-white/50">
+                        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                            <h3 className="font-bold text-lg text-slate-800">{title}</h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-700 transition-colors">
+                                <Icons.X />
+                            </button>
+                        </div>
+                        <div className="p-6 max-h-[80vh] overflow-y-auto">
+                            {children}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const InputField = ({ label, name, type="text", value, onChange, required=false, placeholder="" }) => (
+            <div className="mb-5">
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">{label} {required && "*"}</label>
+                <input 
+                    type={type} 
+                    name={name}
+                    value={value} 
+                    onChange={onChange}
+                    placeholder={placeholder}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm"
+                    required={required}
+                />
+            </div>
+        );
+
+        const formatKRW = (num) => new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW' }).format(num);
+
+        /**
+         * ------------------------------------------------------------------
+         * [Components] Charts
+         * ------------------------------------------------------------------
+         */
+        const DonutChart = ({ data }) => {
+            if (!data || data.length === 0) return <div className="h-40 flex items-center justify-center text-slate-400 text-sm">데이터가 없습니다</div>;
+            const statusCounts = data.reduce((acc, curr) => { acc[curr.status] = (acc[curr.status] || 0) + 1; return acc; }, {});
+            const total = data.length;
+            const colors = { '선정': '#10B981', '접수완료': '#34D399', '작성중': '#60A5FA', '마감임박': '#F87171', '대기': '#9CA3AF' };
+            
+            let currentAngle = 0;
+            const segments = Object.entries(statusCounts).map(([status, count]) => {
+                const percentage = (count / total) * 100;
+                const color = colors[status] || '#E5E7EB';
+                const segment = `${color} ${currentAngle}% ${currentAngle + percentage}%`;
+                currentAngle += percentage;
+                return segment;
+            });
+
+            return (
+                <div className="flex items-center gap-8 justify-center h-full">
+                    <div className="relative w-36 h-36 rounded-full shadow-lg ring-4 ring-white" style={{ background: `conic-gradient(${segments.join(', ')})` }}>
+                        <div className="absolute inset-0 m-auto w-24 h-24 bg-white/90 backdrop-blur rounded-full flex flex-col items-center justify-center shadow-inner">
+                            <span className="text-2xl font-bold text-slate-800">{total}</span>
+                            <span className="text-xs text-slate-500">Total</span>
+                        </div>
+                    </div>
+                    <ul className="space-y-2 text-xs">
+                        {Object.entries(statusCounts).map(([status, count]) => (
+                            <li key={status} className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: colors[status] || '#E5E7EB' }}></span>
+                                <span className="text-slate-600 font-medium">{status}</span>
+                                <span className="font-bold text-slate-800 ml-auto pl-2">{Math.round((count/total)*100)}%</span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            );
+        };
+
+        const BudgetBarChart = ({ projects, expenses }) => {
+            if (projects.length === 0) return <div className="h-40 flex items-center justify-center text-slate-400 text-sm">데이터가 없습니다</div>;
+            const sortedProjects = [...projects].sort((a, b) => (b.budget || 0) - (a.budget || 0)).slice(0, 5);
+            const maxBudget = Math.max(...sortedProjects.map(p => p.budget || 0)) || 1;
+
+            return (
+                <div className="space-y-5">
+                    {sortedProjects.map(p => {
+                        const spent = expenses.filter(e => e.projectId === p.id && e.status === '승인').reduce((acc, cur) => acc + Number(cur.amount), 0);
+                        const spentPercent = Math.min((spent / (p.budget || 1)) * 100, 100);
+                        const budgetWidth = ((p.budget || 0) / maxBudget) * 100;
+                        return (
+                            <div key={p.id} className="group">
+                                <div className="flex justify-between text-xs mb-1.5 px-1">
+                                    <span className="font-medium text-slate-700 truncate w-1/2 group-hover:text-blue-600 transition-colors">{p.title}</span>
+                                    <span className="text-slate-500">{Math.round(spentPercent)}%</span>
+                                </div>
+                                <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden relative shadow-inner">
+                                    <div className="absolute top-0 left-0 h-full bg-slate-200/50" style={{ width: `${budgetWidth}%` }}></div>
+                                    <div className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full shadow-lg chart-bar" style={{ width: `${(spent / maxBudget) * 100}%` }}></div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        };
+
+        /**
+         * ------------------------------------------------------------------
+         * [Views] Features
+         * ------------------------------------------------------------------
+         */
+
+        const DashboardView = ({ personnel, projects, expenses, year }) => {
+            const activeProjects = projects.filter(p => p.status !== '종료');
+            const totalBudget = projects.reduce((acc, cur) => acc + (Number(cur.budget) || 0), 0);
+            const totalSpent = expenses.reduce((acc, cur) => cur.status === '승인' ? acc + (Number(cur.amount) || 0) : acc, 0);
+            const budgetRate = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">FY {year}</div>
+                        <span className="text-xs text-slate-400">기준 데이터</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                        <Card className="flex items-center space-x-4 border-l-4 border-l-blue-500">
+                            <div className="p-3.5 bg-blue-50 rounded-xl text-blue-600 shadow-sm"><Icons.Users /></div>
+                            <div><p className="text-xs text-slate-500 font-bold uppercase">연구인력 (Total)</p><p className="text-2xl font-bold text-slate-800">{personnel.length}<span className="text-sm font-normal text-slate-400 ml-1">명</span></p></div>
+                        </Card>
+                        <Card className="flex items-center space-x-4 border-l-4 border-l-purple-500">
+                            <div className="p-3.5 bg-purple-50 rounded-xl text-purple-600 shadow-sm"><Icons.Briefcase /></div>
+                            <div><p className="text-xs text-slate-500 font-bold uppercase">진행 과제 ({year})</p><p className="text-2xl font-bold text-slate-800">{activeProjects.length}<span className="text-sm font-normal text-slate-400 ml-1">건</span></p></div>
+                        </Card>
+                        <Card className="flex items-center space-x-4 border-l-4 border-l-emerald-500">
+                            <div className="p-3.5 bg-emerald-50 rounded-xl text-emerald-600 shadow-sm"><Icons.CreditCard /></div>
+                            <div><p className="text-xs text-slate-500 font-bold uppercase">예산 집행률</p><p className="text-2xl font-bold text-slate-800">{budgetRate.toFixed(1)}<span className="text-sm font-normal text-slate-400 ml-1">%</span></p></div>
+                        </Card>
+                        <Card className="flex items-center space-x-4 border-l-4 border-l-rose-500">
+                            <div className="p-3.5 bg-rose-50 rounded-xl text-rose-600 shadow-sm"><Icons.Calendar /></div>
+                            <div><p className="text-xs text-slate-500 font-bold uppercase">마감 임박</p><p className="text-2xl font-bold text-slate-800">{projects.filter(p => p.status === '마감임박').length}<span className="text-sm font-normal text-slate-400 ml-1">건</span></p></div>
+                        </Card>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <Card title={`📊 ${year}년 과제 상태 분포`} className="h-full">
+                            <DonutChart data={projects} />
+                        </Card>
+                        <Card title="💰 예산 집행 현황 (Top 5)" className="h-full">
+                            <BudgetBarChart projects={projects} expenses={expenses} />
+                        </Card>
+                    </div>
+
+                    <Card title={`📈 ${year}년 월별 지출 추이`}>
+                         {expenses.length === 0 ? (
+                            <div className="h-24 flex items-center justify-center text-slate-400 text-sm">해당 연도의 지출 데이터가 없습니다.</div>
+                         ) : (
+                             <div className="flex items-end justify-around h-40 mt-6 px-4 md:px-8 border-b border-slate-100 pb-2 overflow-x-auto">
+                                {[...Array(12)].map((_, i) => {
+                                    const month = i + 1;
+                                    const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+                                    const monthlyTotal = expenses.filter(e => e.date.startsWith(monthStr) && e.status === '승인').reduce((acc, cur) => acc + Number(cur.amount), 0);
+                                    const maxMonthly = 5000000; // Mock Max
+                                    const height = Math.min((monthlyTotal / maxMonthly) * 100, 100);
+                                    
+                                    return (
+                                        <div key={month} className="flex flex-col items-center w-full min-w-[30px] group px-1">
+                                            <div className="w-full bg-gradient-to-t from-blue-500/10 to-blue-500/20 rounded-t-lg relative transition-all duration-300 group-hover:from-blue-500/20 group-hover:to-blue-500/40 chart-bar flex flex-col justify-end" style={{height: `${height || 5}%`}}>
+                                                 <div className="absolute -top-10 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-[10px] py-1 px-2 rounded shadow-lg whitespace-nowrap z-10">
+                                                     {formatKRW(monthlyTotal)}
+                                                 </div>
+                                                 <div className="w-full h-1 bg-blue-500 rounded-t-lg"></div>
+                                            </div>
+                                            <span className="text-[10px] font-semibold text-slate-500 mt-2">{month}월</span>
+                                        </div>
+                                    )
+                                })}
+                             </div>
+                         )}
+                    </Card>
+                </div>
+            );
+        };
+
+        const InstituteView = ({ user }) => {
+            const [info, setInfo] = React.useState({ name: '', certCode: '', establishedDate: '', location: '', field: '' });
+            const [loading, setLoading] = React.useState(false);
+
+            React.useEffect(() => {
+                if (!user) return;
+                const col = getCollection('institute'); if(!col) return;
+                col.doc('main').get().then(doc => { if (doc.exists) setInfo(doc.data()); });
+            }, [user]);
+
+            const handleSave = async () => {
+                if (!user) return;
+                setLoading(true);
+                try {
+                    await getCollection('institute').doc('main').set(info, { merge: true });
+                    alert('성공적으로 저장되었습니다.');
+                } catch(e) { alert("저장 오류: " + e.message); }
+                setLoading(false);
+            };
+
+            return (
+                <Card title="🏢 기업부설연구소 기본 정보" className="max-w-4xl mx-auto animate-fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <InputField label="연구소명" value={info.name} onChange={(e) => setInfo({ ...info, name: e.target.value })} />
+                        <InputField label="인정번호" value={info.certCode} onChange={(e) => setInfo({ ...info, certCode: e.target.value })} />
+                        <InputField label="설립일자" type="date" value={info.establishedDate} onChange={(e) => setInfo({ ...info, establishedDate: e.target.value })} />
+                        <InputField label="주 연구분야" value={info.field} onChange={(e) => setInfo({ ...info, field: e.target.value })} />
+                        <div className="md:col-span-2"><InputField label="소재지" value={info.location} onChange={(e) => setInfo({ ...info, location: e.target.value })} /></div>
+                    </div>
+                    <div className="mt-8 pt-6 border-t border-slate-100 flex justify-end"><Button onClick={handleSave} disabled={loading}>{loading ? '저장 중...' : '변경사항 저장'}</Button></div>
+                </Card>
+            );
+        };
+
+        const PersonnelView = ({ list, deletedList = [], user, searchQuery = '' }) => {
+            const [isModalOpen, setIsModalOpen] = React.useState(false);
+            const [formData, setFormData] = React.useState({ name: '', position: '', degree: '', major: '', status: '재직' });
+            const [showTrash, setShowTrash] = React.useState(false);
+            const displayedList = showTrash ? deletedList : list;
+            const normalizedSearch = searchQuery.trim().toLowerCase();
+            const searchedList = displayedList.filter(p => {
+                if (!normalizedSearch) return true;
+                return [p.name, p.position, p.degree, p.major, p.status].some(v => String(v || '').toLowerCase().includes(normalizedSearch));
+            });
+
+            const handleSubmit = async (e) => {
+                e.preventDefault(); if(!user) return;
+                if (!formData.name.trim() || !formData.position.trim()) {
+                    alert("성명과 직위는 필수입니다.");
+                    return;
+                }
+                try { await getCollection('personnel').add({ ...formData, createdAt: firebase.firestore.FieldValue.serverTimestamp() }); setIsModalOpen(false); setFormData({ name: '', position: '', degree: '', major: '', status: '재직' }); } catch(e) { alert(e.message); }
+            };
+            const handleDelete = async (id) => {
+                if(!user) return;
+                if(confirm('삭제하시겠습니까?')) {
+                    await getCollection('personnel').doc(id).update({
+                        deletedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        deletedBy: user.uid || 'unknown',
+                        deleteReason: 'manual-delete'
+                    });
+                }
+            };
+            const handleRestore = async (id) => {
+                if(!user) return;
+                await getCollection('personnel').doc(id).update({
+                    deletedAt: firebase.firestore.FieldValue.delete(),
+                    deletedBy: firebase.firestore.FieldValue.delete(),
+                    deleteReason: firebase.firestore.FieldValue.delete(),
+                    restoredAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    restoredBy: user.uid || 'unknown'
+                });
+            };
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-xl font-bold text-slate-800">연구인력 현황</h2>
+                        <div className="flex gap-2">
+                            <Button variant="secondary" onClick={() => setShowTrash(!showTrash)}>
+                                {showTrash ? '목록 보기' : '휴지통 보기'}
+                            </Button>
+                            <Button onClick={() => setIsModalOpen(true)}><Icons.Plus /> 연구원 등록</Button>
+                        </div>
+                    </div>
+                    <Card className="overflow-hidden p-0 border-0">
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-slate-500 uppercase bg-slate-50/80 border-b border-slate-100">
+                                <tr>
+                                    <th className="px-6 py-4 font-semibold">성명</th><th className="px-6 py-4 font-semibold">직위</th><th className="px-6 py-4 font-semibold">학위/전공</th><th className="px-6 py-4 font-semibold">상태</th><th className="px-6 py-4 text-right">관리</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {searchedList.map(p => (
+                                    <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                                        <td className="px-6 py-4 font-medium text-slate-800">{p.name}</td>
+                                        <td className="px-6 py-4 text-slate-600">{p.position}</td>
+                                        <td className="px-6 py-4 text-slate-600">{p.degree} / {p.major}</td>
+                                        <td className="px-6 py-4"><StatusBadge status={p.status} /></td>
+                                        <td className="px-6 py-4 text-right">
+                                            {showTrash ? (
+                                                <button onClick={() => handleRestore(p.id)} className="text-emerald-500 hover:text-emerald-600 text-xs font-semibold transition-colors">복원</button>
+                                            ) : (
+                                                <button onClick={() => handleDelete(p.id)} className="text-rose-400 hover:text-rose-600 transition-colors"><Icons.Trash /></button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        {searchedList.length === 0 && <div className="p-10 text-center text-slate-400">{showTrash ? '휴지통이 비어 있습니다.' : '등록된 인력이 없습니다.'}</div>}
+                    </Card>
+                    <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="신규 연구원 등록">
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <InputField label="성명" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required />
+                            <InputField label="직위" value={formData.position} onChange={e => setFormData({...formData, position: e.target.value})} required />
+                            <div className="grid grid-cols-2 gap-4">
+                                <InputField label="학위" value={formData.degree} onChange={e => setFormData({...formData, degree: e.target.value})} />
+                                <InputField label="전공" value={formData.major} onChange={e => setFormData({...formData, major: e.target.value})} />
+                            </div>
+                            <Button className="w-full mt-4" type="submit">등록하기</Button>
+                        </form>
+                    </Modal>
+                </div>
+            );
+        };
+
+        const ProjectView = ({ list, deletedList = [], user, year, searchQuery = '' }) => {
+            const [isModalOpen, setIsModalOpen] = React.useState(false);
+            const [formData, setFormData] = React.useState({ title: '', agency: '', deadline: '', startDate: '', type: 'R&D', status: '작성중', budget: 0 });
+            const [showTrash, setShowTrash] = React.useState(false);
+            const displayedList = showTrash ? deletedList : list;
+            const normalizedSearch = searchQuery.trim().toLowerCase();
+            const searchedList = displayedList.filter(p => {
+                if (!normalizedSearch) return true;
+                return [p.title, p.agency, p.status, p.startDate, p.deadline].some(v => String(v || '').toLowerCase().includes(normalizedSearch));
+            });
+
+            const handleSubmit = async (e) => {
+                e.preventDefault(); if(!user) return;
+                const budgetNum = Number(formData.budget);
+                if (!formData.title.trim() || !formData.agency.trim()) { alert("과제명과 전담기관은 필수입니다."); return; }
+                if (!Number.isFinite(budgetNum) || budgetNum <= 0) { alert("총 사업비는 0보다 커야 합니다."); return; }
+                if (formData.startDate && formData.deadline && new Date(formData.startDate) > new Date(formData.deadline)) {
+                    alert("시작일은 마감일보다 늦을 수 없습니다.");
+                    return;
+                }
+                try { 
+                    await getCollection('projects').add({ 
+                        ...formData, 
+                        budget: budgetNum, 
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp() 
+                    }); 
+                    setIsModalOpen(false); 
+                    setFormData({ title: '', agency: '', deadline: '', startDate: '', type: 'R&D', status: '작성중', budget: 0 }); 
+                } catch(e) { alert(e.message); }
+            };
+            const handleDelete = async (id) => {
+                if(!user) return;
+                if(confirm('삭제하시겠습니까?')) {
+                    await getCollection('projects').doc(id).update({
+                        deletedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        deletedBy: user.uid || 'unknown',
+                        deleteReason: 'manual-delete'
+                    });
+                }
+            };
+            const handleRestore = async (id) => {
+                if(!user) return;
+                await getCollection('projects').doc(id).update({
+                    deletedAt: firebase.firestore.FieldValue.delete(),
+                    deletedBy: firebase.firestore.FieldValue.delete(),
+                    deleteReason: firebase.firestore.FieldValue.delete(),
+                    restoredAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    restoredBy: user.uid || 'unknown'
+                });
+            };
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <h2 className="text-xl font-bold text-slate-800">정부지원사업 목록</h2>
+                            <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">{year}년 관련</span>
+                        </div>
+                        <div className="flex gap-2">
+                            <Button variant="secondary" onClick={() => setShowTrash(!showTrash)}>
+                                {showTrash ? '목록 보기' : '휴지통 보기'}
+                            </Button>
+                            <Button onClick={() => setIsModalOpen(true)}><Icons.Plus /> 과제 등록</Button>
+                        </div>
+                    </div>
+                    {searchedList.length === 0 ? (
+                        <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-2xl">
+                            <p className="text-slate-400 mb-2 font-medium">{showTrash ? `${year}년도 휴지통이 비어 있습니다.` : `${year}년도에 수행되는 과제가 없습니다.`}</p>
+                            <p className="text-xs text-slate-300">다른 연도를 선택하거나 새로운 과제를 등록해보세요.</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {searchedList.map(p => (
+                                <Card key={p.id}>
+                                    <div className="flex justify-between items-start mb-3">
+                                        <span className="text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md">{p.agency}</span>
+                                        <div className="flex items-center gap-2">
+                                            <StatusBadge status={p.status} />
+                                            {showTrash ? (
+                                                <button onClick={() => handleRestore(p.id)} className="text-emerald-500 hover:text-emerald-600 text-xs font-semibold transition-colors">복원</button>
+                                            ) : (
+                                                <button onClick={() => handleDelete(p.id)} className="text-slate-300 hover:text-rose-500 transition-colors"><Icons.Trash /></button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <h3 className="text-lg font-bold mb-3 text-slate-800 line-clamp-1">{p.title}</h3>
+                                    <div className="space-y-2 text-sm text-slate-600">
+                                        <div className="flex justify-between p-2 bg-slate-50 rounded-lg"><span>총 사업비</span><span className="font-bold text-slate-800">{formatKRW(p.budget || 0)}</span></div>
+                                        <div className="flex justify-between p-2 rounded-lg"><span>기간</span><span className="text-xs font-mono">{p.startDate || '?'} ~ {p.deadline}</span></div>
+                                    </div>
+                                </Card>
+                            ))}
+                        </div>
+                    )}
+                    <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="신규 과제 등록">
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <InputField label="과제명" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} required />
+                            <InputField label="전담기관" value={formData.agency} onChange={e => setFormData({...formData, agency: e.target.value})} required />
+                            <InputField label="총 사업비(원)" type="number" value={formData.budget} onChange={e => setFormData({...formData, budget: e.target.value})} required />
+                            <div className="grid grid-cols-2 gap-4">
+                                <InputField label="시작일" type="date" value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value})} />
+                                <InputField label="마감일" type="date" value={formData.deadline} onChange={e => setFormData({...formData, deadline: e.target.value})} required />
+                            </div>
+                            <Button className="w-full mt-4" type="submit">등록</Button>
+                        </form>
+                    </Modal>
+                </div>
+            );
+        };
+
+        const ScheduleView = ({ projects, year }) => {
+            const months = Array.from({ length: 12 }, (_, i) => i + 1);
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-xl font-bold text-slate-800">연간 프로젝트 일정 (Gantt Chart)</h2>
+                        <div className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">{year}년</div>
+                    </div>
+
+                    <Card className="overflow-x-auto min-h-[400px]">
+                        <div className="min-w-[800px]">
+                            {/* Header */}
+                            <div className="grid grid-cols-12 gap-1 mb-4 border-b border-slate-200 pb-2">
+                                {months.map(m => (
+                                    <div key={m} className="text-center text-xs font-bold text-slate-400">{m}월</div>
+                                ))}
+                            </div>
+                            
+                            {/* Body */}
+                            <div className="space-y-6 relative">
+                                {/* Grid Lines */}
+                                <div className="absolute inset-0 grid grid-cols-12 gap-1 pointer-events-none h-full">
+                                    {months.map(m => <div key={m} className="border-r border-slate-100 last:border-0 h-full"></div>)}
+                                </div>
+
+                                {projects.length === 0 ? (
+                                    <div className="text-center py-10 text-slate-400">해당 연도에 진행되는 과제가 없습니다.</div>
+                                ) : (
+                                    projects.map(p => {
+                                        const start = p.startDate ? new Date(p.startDate) : new Date(year, 0, 1);
+                                        const end = p.deadline ? new Date(p.deadline) : new Date(year, 11, 31);
+                                        
+                                        // Calculate range within selected year
+                                        let startMonth = start.getFullYear() < year ? 0 : start.getMonth();
+                                        let endMonth = end.getFullYear() > year ? 11 : end.getMonth();
+                                        
+                                        // Skip if out of range (though filtered in parent, double check)
+                                        if (start.getFullYear() > year || end.getFullYear() < year) return null;
+
+                                        const duration = endMonth - startMonth + 1;
+                                        const colStart = startMonth + 1;
+                                        
+                                        return (
+                                            <div key={p.id} className="relative z-10">
+                                                <div className="text-xs font-bold text-slate-700 mb-1 px-1 truncate">{p.title}</div>
+                                                <div className="grid grid-cols-12 gap-1">
+                                                    <div 
+                                                        className="h-8 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-500 shadow-md flex items-center px-3 text-xs text-white font-medium whitespace-nowrap overflow-hidden opacity-90 hover:opacity-100 transition-opacity cursor-pointer"
+                                                        style={{ gridColumn: `${colStart} / span ${duration}` }}
+                                                        title={`${p.startDate || '미정'} ~ ${p.deadline}`}
+                                                    >
+                                                        {p.agency}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    </Card>
+                    <p className="text-xs text-slate-400 text-center mt-4">* 해당 연도 이전 시작 과제는 1월부터, 이후 종료 과제는 12월까지 표시됩니다.</p>
+                </div>
+            );
+        };
+
+        const ExpenseView = ({ projects, expenses, allExpenses = [], deletedExpenses = [], user, year, searchQuery = '' }) => {
+            const [isModalOpen, setIsModalOpen] = React.useState(false);
+            const [formData, setFormData] = React.useState({ projectId: '', date: '', item: '', amount: 0, category: '재료비', status: '승인' });
+            const [file, setFile] = React.useState(null);
+            const [filterProject, setFilterProject] = React.useState('ALL');
+            const [uploading, setUploading] = React.useState(false);
+            const [showTrash, setShowTrash] = React.useState(false);
+            
+            const sourceExpenses = showTrash ? deletedExpenses : expenses;
+            const projectFilteredExpenses = filterProject === 'ALL' ? sourceExpenses : sourceExpenses.filter(e => e.projectId === filterProject);
+            const normalizedSearch = searchQuery.trim().toLowerCase();
+            const filteredExpenses = projectFilteredExpenses.filter(e => {
+                if (!normalizedSearch) return true;
+                return [e.projectTitle, e.item, e.status, e.date, e.receiptName].some(v => String(v || '').toLowerCase().includes(normalizedSearch));
+            });
+
+            // [New] Calculate Budget Status per Project (Considering selected year spending)
+            const projectBudgets = React.useMemo(() => {
+                return projects.map(p => {
+                    // Note: This shows TOTAL spent for the project across ALL time to be accurate against Total Budget
+                    // BUT, in this view context, we might want to see how much was spent in THIS year.
+                    // For budget adherence, we usually look at Total vs Total. 
+                    // Let's stick to showing TOTAL spent for the budget bar, but list filtered expenses below.
+                    // However, to be consistent with the "Year Filter", let's show stats for the filtered expenses.
+                    
+                    const yearSpent = expenses
+                        .filter(e => e.projectId === p.id && e.status === '승인')
+                        .reduce((acc, cur) => acc + Number(cur.amount), 0);
+                    const totalSpent = allExpenses
+                        .filter(e => e.projectId === p.id && e.status === '승인')
+                        .reduce((acc, cur) => acc + Number(cur.amount), 0);
+                        
+                    const budget = Number(p.budget) || 0;
+                    const remaining = budget - totalSpent;
+                    const percentage = budget > 0 ? (totalSpent / budget) * 100 : 0;
+                    return { ...p, yearSpent, totalSpent, remaining, percentage };
+                });
+            }, [projects, expenses, allExpenses]);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault(); 
+                if(!user) return;
+                if (!formData.projectId) { alert("관련 과제를 선택해주세요."); return; }
+                if (!formData.date) { alert("지출 일자를 입력해주세요."); return; }
+                if (!formData.item.trim()) { alert("사용 내역을 입력해주세요."); return; }
+                if (!Number.isFinite(Number(formData.amount)) || Number(formData.amount) <= 0) { alert("금액은 0보다 커야 합니다."); return; }
+                
+                setUploading(true);
+                try {
+                    const selectedProject = projects.find(p => p.id === formData.projectId);
+                    let receiptUrl = null;
+                    let receiptName = null;
+
+                    if (file) {
+                        const storageRef = storage.ref(getStoragePath(file.name));
+                        await storageRef.put(file);
+                        receiptUrl = await storageRef.getDownloadURL();
+                        receiptName = file.name;
+                    }
+
+                    await getCollection('expenses').add({ 
+                        ...formData, 
+                        projectTitle: selectedProject ? selectedProject.title : 'Unknown',
+                        amount: Number(formData.amount),
+                        receiptUrl,
+                        receiptName,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp() 
+                    });
+                    
+                    setIsModalOpen(false); 
+                    setFormData({ projectId: '', date: '', item: '', amount: 0, category: '재료비', status: '승인' });
+                    setFile(null);
+                } catch(e) { 
+                    alert("오류가 발생했습니다: " + e.message); 
+                } finally {
+                    setUploading(false);
+                }
+            };
+            
+            const handleDelete = async (id) => {
+                if(!user) return;
+                if(confirm('삭제하시겠습니까?')) {
+                    await getCollection('expenses').doc(id).update({
+                        deletedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        deletedBy: user.uid || 'unknown',
+                        deleteReason: 'manual-delete'
+                    });
+                }
+            };
+            const handleRestore = async (id) => {
+                if(!user) return;
+                await getCollection('expenses').doc(id).update({
+                    deletedAt: firebase.firestore.FieldValue.delete(),
+                    deletedBy: firebase.firestore.FieldValue.delete(),
+                    deleteReason: firebase.firestore.FieldValue.delete(),
+                    restoredAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    restoredBy: user.uid || 'unknown'
+                });
+            };
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <h2 className="text-xl font-bold text-slate-800">연구비 집행 및 정산</h2>
+                            <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">{year}년 귀속</span>
+                        </div>
+                        <div className="flex gap-2">
+                            <Button variant="secondary" onClick={() => setShowTrash(!showTrash)}>
+                                {showTrash ? '목록 보기' : '휴지통 보기'}
+                            </Button>
+                            <Button onClick={() => setIsModalOpen(true)}><Icons.Plus /> 지출 내역 등록</Button>
+                        </div>
+                    </div>
+
+                    {/* Budget Summary Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-2">
+                        {projectBudgets.map(p => (
+                            <Card key={p.id} className="relative overflow-hidden group">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                                <h4 className="text-sm font-bold text-slate-700 truncate mb-4" title={p.title}>{p.title}</h4>
+                                <div className="space-y-2 text-xs">
+                                    <div className="flex justify-between text-slate-500">
+                                        <span>총 예산</span>
+                                        <span className="font-semibold text-slate-600">{formatKRW(p.budget)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-slate-500">
+                                        <span>{year}년 집행액</span>
+                                        <span className="text-blue-600 font-semibold">{formatKRW(p.yearSpent)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-slate-500">
+                                        <span>누적 집행액</span>
+                                        <span className="font-semibold text-slate-700">{formatKRW(p.totalSpent)}</span>
+                                    </div>
+                                    <div className="flex justify-between pt-2 border-t border-slate-100 mt-2">
+                                        <span className="font-bold text-slate-700">잔액 (전체)</span>
+                                        <span className={`font-bold ${p.remaining < 0 ? 'text-rose-500' : 'text-slate-700'}`}>{formatKRW(p.remaining)}</span>
+                                    </div>
+                                </div>
+                                <div className="mt-4 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                    <div 
+                                        className={`h-full rounded-full transition-all duration-500 ${p.percentage > 100 ? 'bg-rose-500' : 'bg-blue-500'}`} 
+                                        style={{ width: `${Math.min(p.percentage, 100)}%` }}
+                                    ></div>
+                                </div>
+                                <div className="text-right mt-1.5">
+                                    <span className={`text-[10px] font-medium text-slate-400`}>
+                                        (필터된 기간 내 사용액 기준)
+                                    </span>
+                                </div>
+                            </Card>
+                        ))}
+                        {projectBudgets.length === 0 && (
+                            <div className="col-span-full py-10 text-center text-slate-400 bg-white/50 rounded-2xl border border-slate-200 border-dashed">
+                                {year}년도에 해당하는 과제가 없습니다.
+                            </div>
+                        )}
+                    </div>
+
+                    <Card title={`${year}년 지출 내역 목록`}>
+                        <div className="mb-6 flex justify-end">
+                            <select className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" onChange={(e) => setFilterProject(e.target.value)}>
+                                <option value="ALL">전체 과제 보기</option>
+                                {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                            </select>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-slate-50/50 text-slate-500 border-b border-slate-100">
+                                    <tr>
+                                        <th className="px-4 py-3 font-semibold">날짜</th><th className="px-4 py-3 font-semibold">과제명</th><th className="px-4 py-3 font-semibold">항목</th><th className="px-4 py-3 font-semibold text-right">금액</th><th className="px-4 py-3 font-semibold">증빙</th><th className="px-4 py-3 font-semibold">상태</th><th className="px-4 py-3"></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {filteredExpenses.map(e => (
+                                        <tr key={e.id} className="hover:bg-slate-50/50 transition-colors">
+                                            <td className="px-4 py-3 text-slate-600 font-mono text-xs">{e.date}</td>
+                                            <td className="px-4 py-3 truncate max-w-[150px] text-slate-700 font-medium" title={e.projectTitle}>{e.projectTitle}</td>
+                                            <td className="px-4 py-3 text-slate-600">{e.item}</td>
+                                            <td className="px-4 py-3 text-right font-bold text-slate-800">{formatKRW(e.amount)}</td>
+                                            <td className="px-4 py-3 text-center">
+                                                {e.receiptUrl ? (
+                                                    <a href={e.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors" title={e.receiptName}>
+                                                        <Icons.Clip />
+                                                    </a>
+                                                ) : <span className="text-slate-300">-</span>}
+                                            </td>
+                                            <td className="px-4 py-3"><StatusBadge status={e.status} /></td>
+                                            <td className="px-4 py-3 text-right">
+                                                {showTrash ? (
+                                                    <button onClick={()=>handleRestore(e.id)} className="text-emerald-500 hover:text-emerald-600 text-xs font-semibold transition-colors">복원</button>
+                                                ) : (
+                                                    <button onClick={()=>handleDelete(e.id)} className="text-slate-300 hover:text-rose-500 transition-colors"><Icons.Trash /></button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {filteredExpenses.length === 0 && <div className="p-10 text-center text-slate-400">{showTrash ? '휴지통 내역이 없습니다.' : '내역이 없습니다.'}</div>}
+                        </div>
+                    </Card>
+
+                    <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="지출 내역 등록">
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div className="mb-5">
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">관련 과제 *</label>
+                                <select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm" value={formData.projectId} onChange={e => setFormData({...formData, projectId: e.target.value})} required>
+                                    <option value="">과제 선택</option>
+                                    {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                                </select>
+                            </div>
+                            <InputField label="지출 일자" type="date" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} required />
+                            <InputField label="사용 내역" value={formData.item} onChange={e => setFormData({...formData, item: e.target.value})} required />
+                            <InputField label="금액(원)" type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} required />
+                            
+                            <div className="mb-5">
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">증빙 자료 (영수증)</label>
+                                <div className="border border-dashed border-slate-300 rounded-xl p-4 text-center hover:bg-slate-50 transition-colors cursor-pointer relative">
+                                    <input 
+                                        type="file" 
+                                        onChange={(e) => setFile(e.target.files[0])} 
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                    />
+                                    <div className="flex flex-col items-center gap-2">
+                                        <span className="text-slate-400"><Icons.Upload /></span>
+                                        <span className="text-xs text-slate-500">{file ? file.name : "클릭하여 파일 업로드"}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <Button className="w-full mt-4" type="submit" disabled={uploading}>
+                                {uploading ? "업로드 중..." : "등록하기"}
+                            </Button>
+                        </form>
+                    </Modal>
+                </div>
+            );
+        };
+
+        const OutputView = ({ projects, user, year, searchQuery = '' }) => {
+            const [files, setFiles] = React.useState([]);
+            const [uploading, setUploading] = React.useState(false);
+            const [selectedProject, setSelectedProject] = React.useState("");
+            const [showTrash, setShowTrash] = React.useState(false);
+            const [viewProjectFilter, setViewProjectFilter] = React.useState("ALL");
+            const [sortBy, setSortBy] = React.useState("created_desc");
+            const fileInputRef = React.useRef();
+
+            React.useEffect(() => {
+                if (!user) return;
+                const col = getCollection('outputs'); if(!col) return;
+                // Note: Filtering outputs by year is a bit tricky since 'createdAt' is a timestamp.
+                // We'll fetch all and filter in memory for simplicity, or complex query.
+                // Given the requirement "Manage by year", we filter visual list here.
+                const unsubscribe = col.onSnapshot(snap => {
+                    const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // Filter: Display only if createdAt is in the selected year
+                    const normalizedSearch = searchQuery.trim().toLowerCase();
+                    const filteredData = data.filter(d => {
+                         if (!d.createdAt) return false;
+                         if (showTrash && !d.deletedAt) return false;
+                         if (!showTrash && d.deletedAt) return false;
+                         const date = d.createdAt.toDate();
+                         if (date.getFullYear() !== year) return false;
+                         if (viewProjectFilter !== "ALL" && (d.projectId || 'common') !== viewProjectFilter) return false;
+                         if (normalizedSearch) {
+                            const hit = [d.name, d.projectTitle, d.url, d.size].some(v => String(v || '').toLowerCase().includes(normalizedSearch));
+                            if (!hit) return false;
+                         }
+                         return true;
+                    });
+                    
+                    filteredData.sort((a, b) => {
+                        const aSec = a.createdAt?.seconds || 0;
+                        const bSec = b.createdAt?.seconds || 0;
+                        const aSize = Number(a.sizeBytes || parseFloat(String(a.size || '').replace('KB','')) * 1024 || 0);
+                        const bSize = Number(b.sizeBytes || parseFloat(String(b.size || '').replace('KB','')) * 1024 || 0);
+                        if (sortBy === "created_asc") return aSec - bSec;
+                        if (sortBy === "name_asc") return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+                        if (sortBy === "size_desc") return bSize - aSize;
+                        return bSec - aSec;
+                    });
+                    setFiles(filteredData);
+                });
+                return () => unsubscribe();
+            }, [user, year, showTrash, searchQuery, viewProjectFilter, sortBy]); // Re-run when filters change
+
+            const handleUpload = async (e) => {
+                const file = e.target.files[0]; if (!file || !user) return;
+                if (!selectedProject && projects.length > 0) { alert("과제를 선택해주세요."); e.target.value = null; return; }
+                setUploading(true);
+                try {
+                    const projectTitle = projects.find(p => p.id === selectedProject)?.title || "공통/기타";
+                    const storageRef = storage.ref(getStoragePath(file.name));
+                    await storageRef.put(file);
+                    const url = await storageRef.getDownloadURL();
+                    await getCollection('outputs').add({ name: file.name, url: url, size: (file.size/1024).toFixed(1)+'KB', sizeBytes: file.size, projectId: selectedProject || 'common', projectTitle: projectTitle, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                    alert("완료");
+                } catch (e) { alert(e.message); }
+                setUploading(false); e.target.value = null;
+            };
+            const handleDelete = async (id) => {
+                if(!user) return;
+                if(confirm('삭제?')) {
+                    await getCollection('outputs').doc(id).update({
+                        deletedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        deletedBy: user.uid || 'unknown',
+                        deleteReason: 'manual-delete'
+                    });
+                }
+            };
+            const handleRestore = async (id) => {
+                if(!user) return;
+                await getCollection('outputs').doc(id).update({
+                    deletedAt: firebase.firestore.FieldValue.delete(),
+                    deletedBy: firebase.firestore.FieldValue.delete(),
+                    deleteReason: firebase.firestore.FieldValue.delete(),
+                    restoredAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    restoredBy: user.uid || 'unknown'
+                });
+            };
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                     <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-bold text-slate-400">{year}년 등록 파일</span>
+                    </div>
+                    <Card title="📂 성과물 및 문서 보관함" 
+                        action={
+                            <div className="flex gap-2">
+                                <Button variant="secondary" onClick={() => setShowTrash(!showTrash)}>
+                                    {showTrash ? '목록 보기' : '휴지통 보기'}
+                                </Button>
+                                <select className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 max-w-[170px] focus:ring-2 focus:ring-blue-500/20 outline-none" value={viewProjectFilter} onChange={(e) => setViewProjectFilter(e.target.value)}>
+                                    <option value="ALL">목록: 전체 과제</option>
+                                    <option value="common">목록: 공통/기타</option>
+                                    {projects.map(p => <option key={p.id} value={p.id}>목록: {p.title}</option>)}
+                                </select>
+                                <select className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 max-w-[160px] focus:ring-2 focus:ring-blue-500/20 outline-none" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                                    <option value="created_desc">최신순</option>
+                                    <option value="created_asc">오래된순</option>
+                                    <option value="name_asc">이름순</option>
+                                    <option value="size_desc">크기큰순</option>
+                                </select>
+                                <select className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 max-w-[200px] focus:ring-2 focus:ring-blue-500/20 outline-none" value={selectedProject} onChange={(e) => setSelectedProject(e.target.value)}>
+                                    <option value="">과제 선택 (필수)</option>
+                                    <option value="common">공통/기타</option>
+                                    {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                                </select>
+                                <Button disabled={uploading} onClick={()=>fileInputRef.current.click()}>
+                                    {uploading ? '업로드..' : <><Icons.Upload/> 업로드</>}
+                                </Button>
+                            </div>
+                        }
+                    >
+                        <input type="file" ref={fileInputRef} onChange={handleUpload} className="hidden" />
+                        <div className="overflow-x-auto mt-4">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-slate-50/50 border-b border-slate-100 text-slate-500">
+                                    <tr>
+                                        <th className="p-3 font-semibold">관련 과제</th><th className="p-3 font-semibold">파일명</th><th className="p-3 font-semibold">크기</th><th className="p-3 font-semibold">등록일</th><th className="p-3 text-right"></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {files.map(f => (
+                                        <tr key={f.id} className="hover:bg-slate-50/50 transition-colors">
+                                            <td className="p-3"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${f.projectId === 'common' ? 'bg-slate-100 text-slate-500' : 'bg-indigo-50 text-indigo-600'}`}>{f.projectTitle || '공통'}</span></td>
+                                            <td className="p-3"><a href={f.url} target="_blank" rel="noopener noreferrer" className="text-slate-700 hover:text-blue-600 font-medium flex items-center gap-2 transition-colors"><Icons.FileText /> {f.name}</a></td>
+                                            <td className="p-3 text-slate-500 text-xs font-mono">{f.size}</td>
+                                            <td className="p-3 text-slate-500 text-xs">{f.createdAt?.toDate().toLocaleDateString() || '-'}</td>
+                                            <td className="p-3 text-right">
+                                                {showTrash ? (
+                                                    <button onClick={()=>handleRestore(f.id)} className="text-emerald-500 hover:text-emerald-600 text-xs font-semibold transition-colors">복원</button>
+                                                ) : (
+                                                    <button onClick={()=>handleDelete(f.id)} className="text-slate-300 hover:text-rose-500 transition-colors"><Icons.Trash /></button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {files.length === 0 && <div className="p-10 text-center text-slate-400">{showTrash ? `${year}년 휴지통이 비어 있습니다.` : `${year}년에 등록된 파일이 없습니다.`}</div>}
+                        </div>
+                    </Card>
+                </div>
+            );
+        };
+
+        /**
+         * ------------------------------------------------------------------
+         * [Layout] Main App
+         * ------------------------------------------------------------------
+         */
+        const App = () => {
+            const [currentView, setCurrentView] = React.useState('dashboard');
+            // [New] Year State
+            const [selectedYear, setSelectedYear] = React.useState(new Date().getFullYear());
+            const [searchQuery, setSearchQuery] = React.useState('');
+            
+            const [personnel, setPersonnel] = React.useState([]);
+            const [projects, setProjects] = React.useState([]);
+            const [expenses, setExpenses] = React.useState([]);
+            const [user, setUser] = React.useState(null);
+            const [loading, setLoading] = React.useState(true);
+            const [isOnline, setIsOnline] = React.useState(true);
+            const [isNotiOpen, setIsNotiOpen] = React.useState(false);
+
+            React.useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        // [FIX] Priority: Custom Token > Anonymous
+                        // Explicitly set persistence to LOCAL to avoid network request loops or flaky session handling in iframe
+                        await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await auth.signInWithCustomToken(__initial_auth_token);
+                        } else {
+                            await auth.signInAnonymously();
+                        }
+                        setIsOnline(true);
+                    } catch (error) { 
+                        console.error("Auth Failed:", error); 
+                        setIsOnline(false); 
+                        // [FALLBACK] Load Mock Data if Auth fails (e.g. network restriction)
+                        setPersonnel(MOCK_DATA.personnel);
+                        setProjects(MOCK_DATA.projects);
+                        setExpenses(MOCK_DATA.expenses);
+                    }
+                };
+                
+                if (auth) { 
+                    initAuth(); 
+                    const unsubscribeAuth = auth.onAuthStateChanged((u) => { 
+                        setUser(u); 
+                        setLoading(false);
+                        if(u) setIsOnline(true);
+                    }); 
+                    return () => unsubscribeAuth();
+                } else { 
+                    setLoading(false); 
+                    setIsOnline(false); 
+                    // Fallback for no auth SDK
+                    setPersonnel(MOCK_DATA.personnel);
+                    setProjects(MOCK_DATA.projects);
+                    setExpenses(MOCK_DATA.expenses);
+                }
+            }, []);
+
+            React.useEffect(() => {
+                if (!user || !db) return;
+                
+                const unsubP = getCollection('personnel')?.onSnapshot(
+                    snap => setPersonnel(snap.docs.map(d=>({id:d.id, ...d.data()}))),
+                    err => console.log("Firestore Error:", err)
+                );
+                const unsubJ = getCollection('projects')?.onSnapshot(
+                    snap => setProjects(snap.docs.map(d=>({id:d.id, ...d.data()}))),
+                    err => console.log("Firestore Error:", err)
+                );
+                const unsubE = getCollection('expenses')?.onSnapshot(
+                    snap => setExpenses(snap.docs.map(d=>({id:d.id, ...d.data()}))),
+                    err => console.log("Firestore Error:", err)
+                );
+                return () => { unsubP && unsubP(); unsubJ && unsubJ(); unsubE && unsubE(); };
+            }, [user]);
+
+            // [New] Data Filtering Logic based on selectedYear
+            const activePersonnel = React.useMemo(() => personnel.filter(p => !p.deletedAt), [personnel]);
+            const deletedPersonnel = React.useMemo(() => personnel.filter(p => p.deletedAt), [personnel]);
+            const activeProjects = React.useMemo(() => projects.filter(p => !p.deletedAt), [projects]);
+            const deletedProjects = React.useMemo(() => projects.filter(p => p.deletedAt), [projects]);
+            const activeExpenses = React.useMemo(() => expenses.filter(e => !e.deletedAt), [expenses]);
+            const deletedExpenses = React.useMemo(() => expenses.filter(e => e.deletedAt), [expenses]);
+
+            const filteredProjects = React.useMemo(() => {
+                return activeProjects.filter(p => {
+                    // Logic: Project is displayed if it overlaps with the selected year
+                    const startYear = p.startDate ? new Date(p.startDate).getFullYear() : 0;
+                    const endYear = p.deadline ? new Date(p.deadline).getFullYear() : 9999;
+                    return selectedYear >= startYear && selectedYear <= endYear;
+                });
+            }, [activeProjects, selectedYear]);
+
+            const filteredDeletedProjects = React.useMemo(() => {
+                return deletedProjects.filter(p => {
+                    const startYear = p.startDate ? new Date(p.startDate).getFullYear() : 0;
+                    const endYear = p.deadline ? new Date(p.deadline).getFullYear() : 9999;
+                    return selectedYear >= startYear && selectedYear <= endYear;
+                });
+            }, [deletedProjects, selectedYear]);
+
+            const filteredExpenses = React.useMemo(() => {
+                return activeExpenses.filter(e => {
+                    return e.date && e.date.startsWith(String(selectedYear));
+                });
+            }, [activeExpenses, selectedYear]);
+
+            const filteredDeletedExpenses = React.useMemo(() => {
+                return deletedExpenses.filter(e => {
+                    return e.date && e.date.startsWith(String(selectedYear));
+                });
+            }, [deletedExpenses, selectedYear]);
+
+            const normalizedSearch = searchQuery.trim().toLowerCase();
+            const includesSearch = (...values) => {
+                if (!normalizedSearch) return true;
+                return values.some(v => String(v || '').toLowerCase().includes(normalizedSearch));
+            };
+
+            const searchedActivePersonnel = React.useMemo(
+                () => activePersonnel.filter(p => includesSearch(p.name, p.position, p.degree, p.major, p.status)),
+                [activePersonnel, normalizedSearch]
+            );
+            const searchedFilteredProjects = React.useMemo(
+                () => filteredProjects.filter(p => includesSearch(p.title, p.agency, p.status, p.startDate, p.deadline)),
+                [filteredProjects, normalizedSearch]
+            );
+            const searchedFilteredExpenses = React.useMemo(
+                () => filteredExpenses.filter(e => includesSearch(e.projectTitle, e.item, e.status, e.date, e.receiptName)),
+                [filteredExpenses, normalizedSearch]
+            );
+
+            const yearOptions = React.useMemo(() => {
+                const currentYear = new Date().getFullYear();
+                const years = [];
+                projects.forEach(p => {
+                    if (p.startDate) years.push(new Date(p.startDate).getFullYear());
+                    if (p.deadline) years.push(new Date(p.deadline).getFullYear());
+                });
+                expenses.forEach(e => {
+                    if (e.date) years.push(new Date(e.date).getFullYear());
+                });
+                const validYears = years.filter(y => Number.isFinite(y));
+                const minYear = validYears.length ? Math.min(...validYears, currentYear - 2) : currentYear - 2;
+                const maxYear = validYears.length ? Math.max(...validYears, currentYear + 2) : currentYear + 2;
+                return Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i);
+            }, [projects, expenses]);
+
+            React.useEffect(() => {
+                if (!yearOptions.includes(selectedYear)) {
+                    setSelectedYear(yearOptions[yearOptions.length - 1]);
+                }
+            }, [yearOptions, selectedYear]);
+
+            // Notifications Logic (Filtered projects)
+            const notifications = React.useMemo(() => {
+                const alerts = [];
+                const today = new Date();
+                
+                filteredProjects.forEach(p => {
+                    if (p.deadline) {
+                        const d = new Date(p.deadline);
+                        const diffTime = d - today;
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        
+                        if (diffDays >= 0 && diffDays <= 14 && p.status !== '종료') {
+                             alerts.push({
+                                 id: p.id,
+                                 type: 'deadline',
+                                 message: `'${p.title}' 마감이 ${diffDays}일 남았습니다.`,
+                                 date: p.deadline
+                             });
+                        }
+                    }
+                });
+                return alerts;
+            }, [filteredProjects]);
+
+            if (loading) return <div className="flex h-screen items-center justify-center bg-slate-50"><div className="spinner w-10 h-10 border-4 border-blue-500/30 border-t-blue-600 rounded-full"></div></div>;
+
+            const menuItems = [
+                { id: 'dashboard', label: 'Dashboard', icon: Icons.Home },
+                { id: 'schedule', label: '캘린더/일정', icon: Icons.Calendar },
+                { id: 'institute', label: '연구소 정보', icon: Icons.Building },
+                { id: 'personnel', label: '연구인력', icon: Icons.Users },
+                { id: 'projects', label: '과제/사업', icon: Icons.Briefcase },
+                { id: 'expenses', label: '연구비 정산', icon: Icons.CreditCard },
+                { id: 'output', label: '성과 산출물', icon: Icons.FileText },
+            ];
+            
+            return (
+                <div className="flex h-screen overflow-hidden">
+                    <aside className="hidden md:flex flex-col w-64 glass-sidebar z-10 relative">
+                        <div className="p-8 border-b border-slate-100/50 pb-6">
+                            <h1 className="text-xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center gap-2">
+                                <span className="text-2xl">⚡</span> R&D Works
+                            </h1>
+                            <p className="text-xs text-slate-400 mt-1 font-medium tracking-wide">Next Gen Management</p>
+                        </div>
+                        
+                        {/* [New] Year Filter UI */}
+                        <div className="px-6 py-4 border-b border-slate-100/50">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block flex items-center gap-1">
+                                <Icons.Filter /> Fiscal Year
+                            </label>
+                            <div className="relative">
+                                <select 
+                                    value={selectedYear} 
+                                    onChange={(e) => setSelectedYear(Number(e.target.value))}
+                                    className="w-full bg-white/50 border border-slate-200 text-slate-700 text-sm font-bold rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:outline-none block p-2.5 shadow-sm transition-all hover:bg-white"
+                                >
+                                    {yearOptions.map(y => <option key={y} value={y}>{y}년</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        <nav className="flex-1 p-5 space-y-2 overflow-y-auto">
+                            {menuItems.map((item) => (
+                                <button key={item.id} onClick={() => setCurrentView(item.id)} 
+                                    className={`w-full flex items-center gap-3.5 px-4 py-3.5 text-sm font-semibold rounded-2xl transition-all duration-200 group ${currentView === item.id ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/25' : 'text-slate-500 hover:bg-white hover:shadow-md'}`}>
+                                    <span className={`${currentView === item.id ? 'text-white' : 'text-slate-400 group-hover:text-blue-500 transition-colors'}`}><item.icon /></span>
+                                    {item.label}
+                                </button>
+                            ))}
+                        </nav>
+                        <div className="p-6 border-t border-slate-100/50">
+                            <div className="bg-white/50 rounded-xl p-4 border border-white/60 shadow-sm backdrop-blur-sm">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center text-xs font-bold text-slate-600 shadow-inner">U</div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold text-slate-700 truncate">Current User</p>
+                                        <p className="text-[10px] text-slate-400 truncate font-mono">{user?.uid?.substring(0,8)}...</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-200/50">
+                                    {isOnline ? (
+                                        <>
+                                            <div className="connection-dot w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
+                                            <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Cloud Connected</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="w-2 h-2 rounded-full bg-rose-400"></div>
+                                            <span className="text-[10px] font-bold text-rose-500 uppercase tracking-wider">Demo Mode</span>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </aside>
+                    <main className="flex-1 flex flex-col h-screen overflow-hidden relative z-0">
+                        <div className="flex-1 overflow-y-auto p-6 md:p-10 scrollbar-hide">
+                            <div className="max-w-7xl mx-auto pb-10">
+                                <header className="mb-8 flex items-center justify-between animate-fade-in relative z-50">
+                                    <div>
+                                        <h2 className="text-3xl font-bold text-slate-800 tracking-tight">{menuItems.find(m => m.id === currentView)?.label}</h2>
+                                        <p className="text-slate-500 text-sm mt-1 font-medium flex items-center gap-2">
+                                            관리자 모드 접속 중 
+                                            <span className="w-1 h-1 bg-slate-400 rounded-full"></span>
+                                            <span className="text-blue-600 font-bold">{selectedYear}년도 데이터 보기</span>
+                                        </p>
+                                    </div>
+                                    
+                                    <div className="hidden md:flex items-center gap-4">
+                                        <div className="relative">
+                                            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                                                <Icons.Search />
+                                            </div>
+                                            <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="검색..." className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-64 transition-all shadow-sm" />
+                                        </div>
+                                        
+                                        {/* Notification Bell */}
+                                        <div className="relative">
+                                            <button 
+                                                onClick={() => setIsNotiOpen(!isNotiOpen)}
+                                                className={`p-2.5 bg-white border border-slate-200 rounded-full text-slate-500 hover:text-blue-600 hover:shadow-md transition-all relative ${isNotiOpen ? 'ring-2 ring-blue-500/20' : ''}`}
+                                            >
+                                                <Icons.Bell />
+                                                {notifications.length > 0 && (
+                                                    <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>
+                                                )}
+                                            </button>
+
+                                            {/* Dropdown */}
+                                            {isNotiOpen && (
+                                                <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-fade-in">
+                                                    <div className="px-4 py-3 border-b border-slate-50 bg-slate-50/50 flex justify-between items-center">
+                                                        <span className="text-xs font-bold text-slate-500 uppercase">알림 센터</span>
+                                                        <span className="text-xs font-bold text-blue-600">{notifications.length}건</span>
+                                                    </div>
+                                                    <div className="max-h-64 overflow-y-auto">
+                                                        {notifications.length === 0 ? (
+                                                            <div className="p-6 text-center text-slate-400 text-sm">새로운 알림이 없습니다.</div>
+                                                        ) : (
+                                                            <ul className="divide-y divide-slate-50">
+                                                                {notifications.map((note) => (
+                                                                    <li key={note.id} className="p-4 hover:bg-blue-50/30 transition-colors cursor-pointer" onClick={() => setCurrentView('projects')}>
+                                                                        <div className="flex gap-3">
+                                                                            <div className="mt-0.5 text-rose-500"><Icons.AlertTriangle /></div>
+                                                                            <div>
+                                                                                <p className="text-sm text-slate-800 font-medium mb-1">{note.message}</p>
+                                                                                <p className="text-xs text-slate-400">{note.date}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </header>
+                                {currentView === 'dashboard' && <DashboardView personnel={searchedActivePersonnel} projects={searchedFilteredProjects} expenses={searchedFilteredExpenses} year={selectedYear} />}
+                                {currentView === 'schedule' && <ScheduleView projects={searchedFilteredProjects} year={selectedYear} />}
+                                {currentView === 'institute' && <InstituteView user={user} />}
+                                {currentView === 'personnel' && <PersonnelView list={activePersonnel} deletedList={deletedPersonnel} user={user} searchQuery={searchQuery} />}
+                                {currentView === 'projects' && <ProjectView list={filteredProjects} deletedList={filteredDeletedProjects} user={user} year={selectedYear} searchQuery={searchQuery} />}
+                                {currentView === 'expenses' && <ExpenseView projects={filteredProjects} expenses={filteredExpenses} allExpenses={activeExpenses} deletedExpenses={filteredDeletedExpenses} user={user} year={selectedYear} searchQuery={searchQuery} />}
+                                {currentView === 'output' && <OutputView projects={filteredProjects} user={user} year={selectedYear} searchQuery={searchQuery} />}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
