@@ -1114,6 +1114,347 @@
             );
         };
 
+        const RiskCenterView = ({ projects, expenses, outputs, reviews, year, riskActions, onCompleteRisk, onReopenRisk }) => {
+            const today = new Date();
+            const risks = React.useMemo(() => {
+                const list = [];
+                projects.forEach(p => {
+                    if (p.deadline) {
+                        const deadline = new Date(p.deadline);
+                        const diffDays = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
+                        if (diffDays >= 0 && diffDays <= 30 && p.status !== '종료') {
+                            list.push({ id: `${p.id}_deadline`, projectId: p.id, level: diffDays <= 14 ? 'high' : 'medium', type: '마감 임박', project: p.title, detail: `D-${diffDays}`, date: p.deadline });
+                        }
+                    }
+                    const budget = Number(p.budget || 0);
+                    const spent = expenses.filter(e => e.projectId === p.id && e.status === '승인').reduce((acc, cur) => acc + Number(cur.amount || 0), 0);
+                    if (budget > 0 && spent > budget) {
+                        list.push({ id: `${p.id}_budget_over`, projectId: p.id, level: 'high', type: '예산 초과', project: p.title, detail: `${(spent - budget).toLocaleString()}원 초과`, date: p.deadline || p.startDate || '' });
+                    }
+                    if (budget > 0 && (budget - spent) / budget < 0.1 && p.status !== '종료') {
+                        list.push({ id: `${p.id}_budget_low`, projectId: p.id, level: 'medium', type: '예산 소진 임박', project: p.title, detail: `잔여 ${(budget - spent).toLocaleString()}원`, date: p.deadline || '' });
+                    }
+                    const hasOutput = outputs.some(f => (f.projectId === p.id) && !f.deletedAt);
+                    if (!hasOutput && p.deadline && new Date(p.deadline) < today) {
+                        list.push({ id: `${p.id}_output_missing`, projectId: p.id, level: 'high', type: '산출물 누락', project: p.title, detail: '최종 산출물 미등록', date: p.deadline });
+                    }
+                    const hasReview = reviews.some(r => r.projectId === p.id && !r.deletedAt);
+                    if (!hasReview && p.startDate && new Date(p.startDate).getFullYear() <= year) {
+                        list.push({ id: `${p.id}_review_missing`, projectId: p.id, level: 'low', type: '심사 이력 없음', project: p.title, detail: '심사 기록 등록 필요', date: p.startDate });
+                    }
+                });
+                return list.sort((a, b) => (a.level === 'high' ? -1 : 1));
+            }, [projects, expenses, outputs, reviews, year]);
+
+            const completeRisk = async (risk) => {
+                const assignee = prompt("조치 담당자명을 입력하세요.", riskActions?.[risk.id]?.assignee || "");
+                if (assignee === null) return;
+                const note = prompt("조치 메모를 입력하세요.", riskActions?.[risk.id]?.actionNote || "");
+                if (note === null) return;
+                await onCompleteRisk(risk, assignee, note);
+            };
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <Card title={`🚨 리스크 센터 (${year})`}>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+                            <div className="p-4 bg-rose-50 rounded-xl border border-rose-100"><p className="text-xs font-bold text-rose-600">High</p><p className="text-2xl font-bold">{risks.filter(r => r.level === 'high').length}</p></div>
+                            <div className="p-4 bg-amber-50 rounded-xl border border-amber-100"><p className="text-xs font-bold text-amber-600">Medium</p><p className="text-2xl font-bold">{risks.filter(r => r.level === 'medium').length}</p></div>
+                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100"><p className="text-xs font-bold text-slate-600">Low</p><p className="text-2xl font-bold">{risks.filter(r => r.level === 'low').length}</p></div>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-slate-50 text-slate-600 border-b border-slate-100"><tr><th className="p-3">등급</th><th className="p-3">유형</th><th className="p-3">과제</th><th className="p-3">상세</th><th className="p-3">기준일</th><th className="p-3">조치상태</th><th className="p-3 text-right">관리</th></tr></thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {risks.map((r) => {
+                                        const action = riskActions?.[r.id];
+                                        const done = action?.status === 'done';
+                                        return (
+                                            <tr key={r.id}>
+                                                <td className="p-3">{r.level === 'high' ? <StatusBadge status="마감임박" /> : r.level === 'medium' ? <StatusBadge status="대기" /> : <StatusBadge status="작성중" />}</td>
+                                                <td className="p-3">{r.type}</td>
+                                                <td className="p-3 font-medium">{r.project}</td>
+                                                <td className="p-3">{r.detail}</td>
+                                                <td className="p-3 text-xs text-slate-500">{r.date || '-'}</td>
+                                                <td className="p-3">
+                                                    {done ? (
+                                                        <div className="text-xs">
+                                                            <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 font-bold">조치완료</span>
+                                                            <div className="text-slate-500 mt-1">{action.assignee || '-'} / {action.actionAt?.toDate ? action.actionAt.toDate().toLocaleDateString() : (action.actionDate || '-')}</div>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-700 font-bold text-xs">미조치</span>
+                                                    )}
+                                                </td>
+                                                <td className="p-3 text-right">
+                                                    {done ? (
+                                                        <Button variant="secondary" className="!px-3 !py-1.5 !text-xs" onClick={() => onReopenRisk(r.id)}>재오픈</Button>
+                                                    ) : (
+                                                        <Button className="!px-3 !py-1.5 !text-xs" onClick={() => completeRisk(r)}>조치완료</Button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                            {risks.length === 0 && <div className="p-10 text-center text-slate-400">현재 감지된 리스크가 없습니다.</div>}
+                        </div>
+                    </Card>
+                </div>
+            );
+        };
+
+        const ReviewHistoryView = ({ projects, reviews, user, year }) => {
+            const [isModalOpen, setIsModalOpen] = React.useState(false);
+            const [formData, setFormData] = React.useState({ projectId: '', reviewDate: '', stage: '중간', result: '보완요청', reviewer: '', note: '' });
+
+            const filtered = React.useMemo(() => reviews.filter(r => !r.deletedAt && (!r.reviewDate || String(r.reviewDate).startsWith(String(year)))), [reviews, year]);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!formData.projectId || !formData.reviewDate) return alert('과제와 심사일은 필수입니다.');
+                const p = projects.find(x => x.id === formData.projectId);
+                await getCollection('reviews').add({ ...formData, projectTitle: p?.title || '', createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                setFormData({ projectId: '', reviewDate: '', stage: '중간', result: '보완요청', reviewer: '', note: '' });
+                setIsModalOpen(false);
+            };
+
+            const handleDelete = async (id) => {
+                if (!user) return;
+                if (!confirm('삭제하시겠습니까?')) return;
+                await getCollection('reviews').doc(id).update({ deletedAt: firebase.firestore.FieldValue.serverTimestamp(), deletedBy: user.uid || 'unknown' });
+            };
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <Card title="🧾 평가·심사 이력" action={<Button onClick={() => setIsModalOpen(true)}><Icons.Plus /> 심사 등록</Button>}>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-slate-50 text-slate-600 border-b border-slate-100"><tr><th className="p-3">심사일</th><th className="p-3">과제</th><th className="p-3">단계</th><th className="p-3">결과</th><th className="p-3">심사자</th><th className="p-3">메모</th><th className="p-3"></th></tr></thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {filtered.map(r => <tr key={r.id}><td className="p-3">{r.reviewDate}</td><td className="p-3 font-medium">{r.projectTitle}</td><td className="p-3">{r.stage}</td><td className="p-3"><StatusBadge status={r.result} /></td><td className="p-3">{r.reviewer || '-'}</td><td className="p-3 text-slate-600">{r.note || '-'}</td><td className="p-3 text-right"><button onClick={() => handleDelete(r.id)} className="text-slate-300 hover:text-rose-500"><Icons.Trash /></button></td></tr>)}
+                                </tbody>
+                            </table>
+                            {filtered.length === 0 && <div className="p-10 text-center text-slate-400">{year}년도 심사 이력이 없습니다.</div>}
+                        </div>
+                    </Card>
+                    <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="심사 이력 등록">
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">관련 과제 *</label><select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl" value={formData.projectId} onChange={(e)=>setFormData({...formData, projectId:e.target.value})} required><option value="">과제 선택</option>{projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></div>
+                            <InputField label="심사일" type="date" value={formData.reviewDate} onChange={e=>setFormData({...formData, reviewDate:e.target.value})} required />
+                            <div className="grid grid-cols-2 gap-3">
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">단계</label><select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl" value={formData.stage} onChange={(e)=>setFormData({...formData, stage:e.target.value})}><option>사전검토</option><option>중간</option><option>최종</option></select></div>
+                                <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">결과</label><select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl" value={formData.result} onChange={(e)=>setFormData({...formData, result:e.target.value})}><option>승인</option><option>보완요청</option><option>반려</option></select></div>
+                            </div>
+                            <InputField label="심사자" value={formData.reviewer} onChange={e=>setFormData({...formData, reviewer:e.target.value})} />
+                            <InputField label="메모" value={formData.note} onChange={e=>setFormData({...formData, note:e.target.value})} />
+                            <Button className="w-full" type="submit">저장</Button>
+                        </form>
+                    </Modal>
+                </div>
+            );
+        };
+
+        const TemplateLibraryView = ({ templates, user }) => {
+            const [isModalOpen, setIsModalOpen] = React.useState(false);
+            const [formData, setFormData] = React.useState({ title: '', category: '제안서', content: '' });
+            const list = React.useMemo(() => templates.filter(t => !t.deletedAt), [templates]);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!formData.title.trim()) return alert('템플릿명을 입력해주세요.');
+                await getCollection('templates').add({ ...formData, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                setFormData({ title: '', category: '제안서', content: '' });
+                setIsModalOpen(false);
+            };
+
+            const handleDelete = async (id) => {
+                if (!user) return;
+                if (!confirm('삭제하시겠습니까?')) return;
+                await getCollection('templates').doc(id).update({ deletedAt: firebase.firestore.FieldValue.serverTimestamp(), deletedBy: user.uid || 'unknown' });
+            };
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <Card title="📚 템플릿/문서양식" action={<Button onClick={() => setIsModalOpen(true)}><Icons.Plus /> 템플릿 추가</Button>}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {list.map(t => (
+                                <div key={t.id} className="rounded-xl border border-slate-100 bg-white p-4">
+                                    <div className="flex items-center justify-between mb-2"><span className="text-[10px] px-2 py-1 rounded-full bg-indigo-50 text-indigo-600 font-bold">{t.category}</span><button onClick={() => handleDelete(t.id)} className="text-slate-300 hover:text-rose-500"><Icons.Trash /></button></div>
+                                    <h4 className="font-bold text-slate-800 mb-2">{t.title}</h4>
+                                    <p className="text-sm text-slate-500 whitespace-pre-wrap">{t.content || '-'}</p>
+                                </div>
+                            ))}
+                        </div>
+                        {list.length === 0 && <div className="p-10 text-center text-slate-400">등록된 템플릿이 없습니다.</div>}
+                    </Card>
+                    <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="템플릿 등록">
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <InputField label="템플릿명" value={formData.title} onChange={e=>setFormData({...formData, title:e.target.value})} required />
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">카테고리</label><select className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl" value={formData.category} onChange={e=>setFormData({...formData, category:e.target.value})}><option>제안서</option><option>중간보고</option><option>최종보고</option><option>정산체크</option></select></div>
+                            <div><label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">내용</label><textarea className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl min-h-[120px]" value={formData.content} onChange={e=>setFormData({...formData, content:e.target.value})}></textarea></div>
+                            <Button className="w-full" type="submit">저장</Button>
+                        </form>
+                    </Modal>
+                </div>
+            );
+        };
+
+        const KPIView = ({ projects, expenses, outputs, reviews, year }) => {
+            const yearOutputs = React.useMemo(() => outputs.filter(o => !o.deletedAt && o.createdAt && o.createdAt.toDate().getFullYear() === year), [outputs, year]);
+            const yearReviews = React.useMemo(() => reviews.filter(r => !r.deletedAt && r.reviewDate && String(r.reviewDate).startsWith(String(year))), [reviews, year]);
+            const yearExpenses = React.useMemo(() => expenses.filter(e => !e.deletedAt && e.date && e.date.startsWith(String(year)) && e.status === '승인'), [expenses, year]);
+            const patents = yearOutputs.filter(o => /특허|patent/i.test(o.name || '')).length;
+            const papers = yearOutputs.filter(o => /논문|paper/i.test(o.name || '')).length;
+            const techTransfer = yearOutputs.filter(o => /기술이전|license/i.test(o.name || '')).length;
+            const totalBudget = projects.reduce((acc, p) => acc + Number(p.budget || 0), 0);
+            const totalSpent = yearExpenses.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+            const completion = projects.length > 0 ? (projects.filter(p => p.status === '종료' || p.status === '선정').length / projects.length) * 100 : 0;
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <Card title={`📈 성과 KPI (${year})`}>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-100"><p className="text-xs font-bold text-indigo-600">특허</p><p className="text-2xl font-bold">{patents}</p></div>
+                            <div className="p-4 rounded-xl bg-sky-50 border border-sky-100"><p className="text-xs font-bold text-sky-600">논문</p><p className="text-2xl font-bold">{papers}</p></div>
+                            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-100"><p className="text-xs font-bold text-emerald-600">기술이전</p><p className="text-2xl font-bold">{techTransfer}</p></div>
+                            <div className="p-4 rounded-xl bg-amber-50 border border-amber-100"><p className="text-xs font-bold text-amber-600">심사 건수</p><p className="text-2xl font-bold">{yearReviews.length}</p></div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                            <div className="p-4 rounded-xl bg-white border border-slate-100"><p className="text-xs text-slate-400">예산 집행률</p><p className="text-xl font-bold">{totalBudget > 0 ? ((totalSpent / totalBudget) * 100).toFixed(1) : '0.0'}%</p></div>
+                            <div className="p-4 rounded-xl bg-white border border-slate-100"><p className="text-xs text-slate-400">완료율</p><p className="text-xl font-bold">{completion.toFixed(1)}%</p></div>
+                            <div className="p-4 rounded-xl bg-white border border-slate-100"><p className="text-xs text-slate-400">산출물 수</p><p className="text-xl font-bold">{yearOutputs.length}건</p></div>
+                        </div>
+                    </Card>
+                </div>
+            );
+        };
+
+        const MilestoneCalendarView = ({ projects, expenses, reviews, year }) => {
+            const events = React.useMemo(() => {
+                const list = [];
+                projects.forEach(p => {
+                    if (p.startDate && p.startDate.startsWith(String(year))) list.push({ date: p.startDate, type: '협약일', project: p.title, note: '과제 시작' });
+                    if (p.startDate && p.deadline) {
+                        const s = new Date(p.startDate); const d = new Date(p.deadline);
+                        if (d >= s) {
+                            const mid = new Date((s.getTime() + d.getTime()) / 2);
+                            if (mid.getFullYear() === year) list.push({ date: mid.toISOString().slice(0,10), type: '중간점검', project: p.title, note: '중간 점검 예정' });
+                        }
+                    }
+                    if (p.deadline && p.deadline.startsWith(String(year))) list.push({ date: p.deadline, type: '최종보고', project: p.title, note: '최종보고/마감' });
+                });
+                expenses.forEach(e => { if (e.date && e.date.startsWith(String(year))) list.push({ date: e.date, type: '정산 집행', project: e.projectTitle, note: `${e.item} / ${Number(e.amount || 0).toLocaleString()}원` }); });
+                reviews.forEach(r => { if (!r.deletedAt && r.reviewDate && r.reviewDate.startsWith(String(year))) list.push({ date: r.reviewDate, type: '심사', project: r.projectTitle || '-', note: `${r.stage} / ${r.result}` }); });
+                return list.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+            }, [projects, expenses, reviews, year]);
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <Card title={`🗓 협약·정산 캘린더 (${year})`}>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-slate-50 text-slate-600 border-b border-slate-100"><tr><th className="p-3">일자</th><th className="p-3">유형</th><th className="p-3">과제</th><th className="p-3">내용</th></tr></thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {events.map((ev, idx) => <tr key={`${ev.date}-${idx}`}><td className="p-3 font-medium">{ev.date}</td><td className="p-3"><StatusBadge status={ev.type === '최종보고' ? '마감임박' : ev.type === '정산 집행' ? '승인' : '작성중'} /></td><td className="p-3">{ev.project}</td><td className="p-3 text-slate-600">{ev.note}</td></tr>)}
+                                </tbody>
+                            </table>
+                            {events.length === 0 && <div className="p-10 text-center text-slate-400">해당 연도 일정 데이터가 없습니다.</div>}
+                        </div>
+                    </Card>
+                </div>
+            );
+        };
+
+        const BackupRestoreView = ({ user, personnel, projects, expenses, outputs, reviews, templates, backups }) => {
+            const [label, setLabel] = React.useState('');
+            const [working, setWorking] = React.useState(false);
+
+            const createBackup = async () => {
+                if (!user) return;
+                setWorking(true);
+                try {
+                    await getCollection('backups').add({
+                        label: label.trim() || `백업_${new Date().toISOString().slice(0,19).replace('T','_')}`,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        createdBy: user.uid || 'unknown',
+                        payload: {
+                            personnel: personnel.filter(x => !x.deletedAt),
+                            projects: projects.filter(x => !x.deletedAt),
+                            expenses: expenses.filter(x => !x.deletedAt),
+                            outputs: outputs.filter(x => !x.deletedAt),
+                            reviews: reviews.filter(x => !x.deletedAt),
+                            templates: templates.filter(x => !x.deletedAt)
+                        }
+                    });
+                    setLabel('');
+                    alert('백업이 생성되었습니다.');
+                } catch (e) {
+                    alert(e.message);
+                }
+                setWorking(false);
+            };
+
+            const restoreBackup = async (backup) => {
+                if (!confirm('선택한 백업 시점으로 복원하시겠습니까? 현재 데이터가 교체됩니다.')) return;
+                setWorking(true);
+                try {
+                    const payload = backup.payload || {};
+                    const targets = [
+                        ['personnel', payload.personnel || []],
+                        ['projects', payload.projects || []],
+                        ['expenses', payload.expenses || []],
+                        ['outputs', payload.outputs || []],
+                        ['reviews', payload.reviews || []],
+                        ['templates', payload.templates || []],
+                    ];
+                    for (const [colName, items] of targets) {
+                        const col = getCollection(colName);
+                        if (!col) continue;
+                        const snap = await col.get();
+                        for (const d of snap.docs) await d.ref.delete();
+                        for (const item of items) {
+                            const clean = { ...item };
+                            delete clean.id;
+                            await col.add(clean);
+                        }
+                    }
+                    alert('복원이 완료되었습니다.');
+                } catch (e) {
+                    alert(e.message);
+                }
+                setWorking(false);
+            };
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <Card title="☁ 백업/복원">
+                        <div className="flex gap-2 mb-4">
+                            <input value={label} onChange={(e)=>setLabel(e.target.value)} placeholder="백업 라벨 (선택)" className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                            <Button onClick={createBackup} disabled={working}><Icons.Cloud /> 백업 생성</Button>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-slate-50 text-slate-600 border-b border-slate-100"><tr><th className="p-3">라벨</th><th className="p-3">생성일</th><th className="p-3">작성자</th><th className="p-3 text-right">관리</th></tr></thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {backups.map(b => (
+                                        <tr key={b.id}>
+                                            <td className="p-3 font-medium">{b.label || '-'}</td>
+                                            <td className="p-3 text-slate-500">{b.createdAt?.toDate ? b.createdAt.toDate().toLocaleString() : '-'}</td>
+                                            <td className="p-3 text-slate-500 font-mono text-xs">{(b.createdBy || '-').substring(0, 12)}</td>
+                                            <td className="p-3 text-right"><Button variant="secondary" className="!px-3 !py-1.5 !text-xs" onClick={() => restoreBackup(b)} disabled={working}>이 시점 복원</Button></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {backups.length === 0 && <div className="p-10 text-center text-slate-400">생성된 백업이 없습니다.</div>}
+                        </div>
+                    </Card>
+                </div>
+            );
+        };
+
         /**
          * ------------------------------------------------------------------
          * [Layout] Main App
@@ -1128,6 +1469,11 @@
             const [personnel, setPersonnel] = React.useState([]);
             const [projects, setProjects] = React.useState([]);
             const [expenses, setExpenses] = React.useState([]);
+            const [outputs, setOutputs] = React.useState([]);
+            const [reviews, setReviews] = React.useState([]);
+            const [templates, setTemplates] = React.useState([]);
+            const [backups, setBackups] = React.useState([]);
+            const [riskActions, setRiskActions] = React.useState({});
             const [user, setUser] = React.useState(null);
             const [loading, setLoading] = React.useState(true);
             const [isOnline, setIsOnline] = React.useState(true);
@@ -1153,6 +1499,11 @@
                         setPersonnel(MOCK_DATA.personnel);
                         setProjects(MOCK_DATA.projects);
                         setExpenses(MOCK_DATA.expenses);
+                        setOutputs([]);
+                        setReviews([]);
+                        setTemplates([]);
+                        setBackups([]);
+                        setRiskActions({});
                     }
                 };
                 
@@ -1171,6 +1522,11 @@
                     setPersonnel(MOCK_DATA.personnel);
                     setProjects(MOCK_DATA.projects);
                     setExpenses(MOCK_DATA.expenses);
+                    setOutputs([]);
+                    setReviews([]);
+                    setTemplates([]);
+                    setBackups([]);
+                    setRiskActions({});
                 }
             }, []);
 
@@ -1189,8 +1545,63 @@
                     snap => setExpenses(snap.docs.map(d=>({id:d.id, ...d.data()}))),
                     err => console.log("Firestore Error:", err)
                 );
-                return () => { unsubP && unsubP(); unsubJ && unsubJ(); unsubE && unsubE(); };
+                const unsubO = getCollection('outputs')?.onSnapshot(
+                    snap => setOutputs(snap.docs.map(d=>({id:d.id, ...d.data()}))),
+                    err => console.log("Firestore Error:", err)
+                );
+                const unsubR = getCollection('reviews')?.onSnapshot(
+                    snap => setReviews(snap.docs.map(d=>({id:d.id, ...d.data()}))),
+                    err => console.log("Firestore Error:", err)
+                );
+                const unsubT = getCollection('templates')?.onSnapshot(
+                    snap => setTemplates(snap.docs.map(d=>({id:d.id, ...d.data()}))),
+                    err => console.log("Firestore Error:", err)
+                );
+                const unsubB = getCollection('backups')?.onSnapshot(
+                    snap => setBackups(snap.docs.map(d=>({id:d.id, ...d.data()}))),
+                    err => console.log("Firestore Error:", err)
+                );
+                const unsubRA = getCollection('riskActions')?.onSnapshot(
+                    snap => {
+                        const map = {};
+                        snap.docs.forEach(d => { map[d.id] = { id: d.id, ...d.data() }; });
+                        setRiskActions(map);
+                    },
+                    err => console.log("Firestore Error:", err)
+                );
+                return () => { unsubP && unsubP(); unsubJ && unsubJ(); unsubE && unsubE(); unsubO && unsubO(); unsubR && unsubR(); unsubT && unsubT(); unsubB && unsubB(); unsubRA && unsubRA(); };
             }, [user]);
+
+            const handleCompleteRisk = async (risk, assignee, actionNote) => {
+                if (!user) return;
+                const col = getCollection('riskActions');
+                if (!col) return;
+                await col.doc(risk.id).set({
+                    riskId: risk.id,
+                    projectId: risk.projectId || '',
+                    projectTitle: risk.project || '',
+                    type: risk.type,
+                    detail: risk.detail,
+                    status: 'done',
+                    assignee: assignee || '',
+                    actionNote: actionNote || '',
+                    actionAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    actionDate: new Date().toISOString().slice(0, 10),
+                    doneBy: user.uid || 'unknown',
+                    doneYear: selectedYear
+                }, { merge: true });
+            };
+
+            const handleReopenRisk = async (riskId) => {
+                if (!user) return;
+                const col = getCollection('riskActions');
+                if (!col) return;
+                await col.doc(riskId).set({
+                    status: 'open',
+                    reopenedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    reopenedBy: user.uid || 'unknown'
+                }, { merge: true });
+            };
 
             // [New] Data Filtering Logic based on selectedYear
             const activePersonnel = React.useMemo(() => personnel.filter(p => !p.deletedAt), [personnel]);
@@ -1258,11 +1669,17 @@
                 expenses.forEach(e => {
                     if (e.date) years.push(new Date(e.date).getFullYear());
                 });
+                reviews.forEach(r => {
+                    if (r.reviewDate) years.push(new Date(r.reviewDate).getFullYear());
+                });
+                outputs.forEach(o => {
+                    if (o.createdAt?.toDate) years.push(o.createdAt.toDate().getFullYear());
+                });
                 const validYears = years.filter(y => Number.isFinite(y));
                 const minYear = validYears.length ? Math.min(...validYears, currentYear - 2) : currentYear - 2;
                 const maxYear = validYears.length ? Math.max(...validYears, currentYear + 2) : currentYear + 2;
                 return Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i);
-            }, [projects, expenses]);
+            }, [projects, expenses, reviews, outputs]);
 
             React.useEffect(() => {
                 if (!yearOptions.includes(selectedYear)) {
@@ -1299,11 +1716,17 @@
             const menuItems = [
                 { id: 'dashboard', label: 'Dashboard', icon: Icons.Home },
                 { id: 'schedule', label: '캘린더/일정', icon: Icons.Calendar },
-                { id: 'institute', label: '연구소 정보', icon: Icons.Building },
-                { id: 'personnel', label: '연구인력', icon: Icons.Users },
+                { id: 'risks', label: '마감·리스크 센터', icon: Icons.AlertTriangle },
                 { id: 'projects', label: '과제/사업', icon: Icons.Briefcase },
                 { id: 'expenses', label: '연구비 정산', icon: Icons.CreditCard },
+                { id: 'reviews', label: '평가·심사 이력', icon: Icons.Bell },
                 { id: 'output', label: '성과 산출물', icon: Icons.FileText },
+                { id: 'kpi', label: '성과 KPI', icon: Icons.Home },
+                { id: 'milestones', label: '협약·정산 캘린더', icon: Icons.Calendar },
+                { id: 'templates', label: '템플릿/문서양식', icon: Icons.Clip },
+                { id: 'backup', label: '백업/복원', icon: Icons.Cloud },
+                { id: 'personnel', label: '연구인력', icon: Icons.Users },
+                { id: 'institute', label: '연구소 정보', icon: Icons.Building },
             ];
             
             return (
@@ -1432,11 +1855,17 @@
                                 </header>
                                 {currentView === 'dashboard' && <DashboardView personnel={searchedActivePersonnel} projects={searchedFilteredProjects} expenses={searchedFilteredExpenses} year={selectedYear} />}
                                 {currentView === 'schedule' && <ScheduleView projects={searchedFilteredProjects} year={selectedYear} />}
+                                {currentView === 'risks' && <RiskCenterView projects={filteredProjects} expenses={filteredExpenses} outputs={outputs} reviews={reviews} year={selectedYear} riskActions={riskActions} onCompleteRisk={handleCompleteRisk} onReopenRisk={handleReopenRisk} />}
                                 {currentView === 'institute' && <InstituteView user={user} />}
                                 {currentView === 'personnel' && <PersonnelView list={activePersonnel} deletedList={deletedPersonnel} user={user} searchQuery={searchQuery} />}
                                 {currentView === 'projects' && <ProjectView list={filteredProjects} deletedList={filteredDeletedProjects} user={user} year={selectedYear} searchQuery={searchQuery} />}
                                 {currentView === 'expenses' && <ExpenseView projects={filteredProjects} expenses={filteredExpenses} allExpenses={activeExpenses} deletedExpenses={filteredDeletedExpenses} user={user} year={selectedYear} searchQuery={searchQuery} />}
                                 {currentView === 'output' && <OutputView projects={filteredProjects} user={user} year={selectedYear} searchQuery={searchQuery} />}
+                                {currentView === 'reviews' && <ReviewHistoryView projects={filteredProjects} reviews={reviews} user={user} year={selectedYear} />}
+                                {currentView === 'kpi' && <KPIView projects={filteredProjects} expenses={filteredExpenses} outputs={outputs} reviews={reviews} year={selectedYear} />}
+                                {currentView === 'milestones' && <MilestoneCalendarView projects={filteredProjects} expenses={filteredExpenses} reviews={reviews} year={selectedYear} />}
+                                {currentView === 'templates' && <TemplateLibraryView templates={templates} user={user} />}
+                                {currentView === 'backup' && <BackupRestoreView user={user} personnel={activePersonnel} projects={activeProjects} expenses={activeExpenses} outputs={outputs} reviews={reviews} templates={templates} backups={backups} />}
                             </div>
                         </div>
                     </main>
